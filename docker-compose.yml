@@ -1,0 +1,35 @@
+services:
+  browser-1:
+    build: .
+    ports:
+      - "6080:6080"   # noVNC
+      - "9222:9223"   # CDP
+    shm_size: 2g
+    volumes:
+      - agent1-data:/app/userdata
+    restart: unless-stopped
+
+  browser-2:
+    build: .
+    ports:
+      - "6081:6080"   # noVNC
+      - "9224:9223"   # CDP
+    shm_size: 2g
+    volumes:
+      - agent2-data:/app/userdata
+    restart: unless-stopped
+
+  browser-3:
+    build: .
+    ports:
+      - "6082:6080"   # noVNC
+      - "9226:9223"   # CDP
+    shm_size: 2g
+    volumes:
+      - agent3-data:/app/userdata
+    restart: unless-stopped
+
+volumes:
+  agent1-data:
+  agent2-data:
+  agent3-data:

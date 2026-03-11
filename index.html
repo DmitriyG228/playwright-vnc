@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Remote Browsers</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #eee; margin: 0; padding: 20px; }
+    h1 { margin-bottom: 20px; font-size: 20px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(600px, 1fr)); gap: 16px; }
+    .browser-card { background: #16213e; border-radius: 8px; overflow: hidden; }
+    .browser-header { margin: 0; padding: 10px 16px; background: #0f3460; font-size: 14px; display: flex; justify-content: space-between; align-items: center; }
+    .browser-header .label { font-weight: 600; }
+    .browser-header a {
+      color: #fff; text-decoration: none; font-size: 13px;
+      background: #e94560; padding: 4px 14px; border-radius: 4px;
+    }
+    .browser-header a:hover { background: #c73650; }
+    iframe { width: 100%; height: 500px; border: none; }
+  </style>
+</head>
+<body>
+  <h1>Remote Browsers</h1>
+  <div class="grid">
+    <div class="browser-card">
+      <div class="browser-header">
+        <span class="label">Browser 1 &mdash; CDP :9222</span>
+        <a href="/1/vnc.html?path=1/websockify&autoconnect=true&resize=scale" target="_blank">Open Fullscreen</a>
+      </div>
+      <iframe src="/1/vnc.html?path=1/websockify&autoconnect=true&resize=scale"></iframe>
+    </div>
+    <div class="browser-card">
+      <div class="browser-header">
+        <span class="label">Browser 2 &mdash; CDP :9224</span>
+        <a href="/2/vnc.html?path=2/websockify&autoconnect=true&resize=scale" target="_blank">Open Fullscreen</a>
+      </div>
+      <iframe src="/2/vnc.html?path=2/websockify&autoconnect=true&resize=scale"></iframe>
+    </div>
+    <div class="browser-card">
+      <div class="browser-header">
+        <span class="label">Browser 3 &mdash; CDP :9226</span>
+        <a href="/3/vnc.html?path=3/websockify&autoconnect=true&resize=scale" target="_blank">Open Fullscreen</a>
+      </div>
+      <iframe src="/3/vnc.html?path=3/websockify&autoconnect=true&resize=scale"></iframe>
+    </div>
+  </div>
+</body>
+</html>
