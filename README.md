@@ -84,39 +84,71 @@ The dashboard shows all running browsers with live noVNC previews, and buttons f
 Agents can create, use, and close browsers on demand — no human intervention needed:
 
 ```
-GET  /api/browsers       - List running browsers (name, vncPort, cdpPort)
-POST /api/create         - Spin up a new browser container (returns cdpPort)
-POST /api/close/:name    - Stop and remove a browser container
-POST /api/sync           - Export cookies from browser-1, import to all others
-POST /api/save           - Save cookies from all browsers to disk
+GET  /api/browsers        - List running browsers (with lock status)
+POST /api/create          - Spin up a new browser container
+POST /api/close/:name     - Stop and remove a browser container
+POST /api/acquire         - Get exclusive access to a browser (creates one if none free)
+POST /api/release/:name   - Release a browser back to the pool
+POST /api/sync            - Export cookies from browser-1, import to all others
+POST /api/save            - Save cookies from all browsers to disk
 ```
 
-### Agent self-service example
+### Agent self-service (acquire/release)
+
+The recommended pattern — agents acquire a browser from the pool, use it exclusively, then release it. If no browser is free, one is created automatically:
 
 ```js
 const { chromium } = require('playwright');
+const API = 'http://localhost:3000';
 
-// 1. Create a browser
-const res = await fetch('http://localhost:3000/api/create', { method: 'POST' });
+// 1. Acquire a browser (exclusive lock)
+const res = await fetch(`${API}/api/acquire`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ agent: 'my-scraper' })
+});
 const { cdpPort, name } = await res.json();
 
-// 2. Wait for it to start
-await new Promise(r => setTimeout(r, 5000));
-
-// 3. Connect and do work
+// 2. Connect and do work — no other agent can use this browser
 const browser = await chromium.connectOverCDP(`http://localhost:${cdpPort}`);
 const page = browser.contexts()[0].pages()[0];
 await page.goto('https://example.com');
 console.log(await page.title());
-
-// 4. Disconnect
 await browser.close();
 
-// 5. Close the browser when done
-await fetch(`http://localhost:3000/api/close/${name}`, { method: 'POST' });
+// 3. Release back to the pool (or close to destroy)
+await fetch(`${API}/api/release/${name}`, { method: 'POST' });
+// OR: await fetch(`${API}/api/close/${name}`, { method: 'POST' });
+```
+
+### Manual create/close
+
+If you prefer direct control without the pool:
+
+```js
+// Create
+const { cdpPort, name } = await (await fetch(`${API}/api/create`, { method: 'POST' })).json();
+await new Promise(r => setTimeout(r, 5000)); // wait for CDP
+
+// Use
+const browser = await chromium.connectOverCDP(`http://localhost:${cdpPort}`);
+// ... work ...
+await browser.close();
+
+// Destroy
+await fetch(`${API}/api/close/${name}`, { method: 'POST' });
 ```
 
 Saved cookies are auto-imported into newly created browsers, so agents get existing login sessions automatically.
+
+### Browser pool behavior
+
+- `/api/acquire` finds the first unlocked browser and locks it to the requesting agent
+- If all browsers are locked, a new one is created automatically
+- `/api/release` unlocks the browser so other agents can acquire it
+- `/api/close` destroys the browser entirely (also removes the lock)
+- `/api/browsers` shows lock status for each browser — who holds it and since when
+- Locks are in-memory; restarting dashboard.js releases all locks
 
 ## Human-in-the-Loop
 

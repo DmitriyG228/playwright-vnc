@@ -5,11 +5,13 @@
  * Open: http://localhost:3000
  *
  * API:
- *   POST /api/save          - Save cookies from all browsers
- *   POST /api/sync          - Export from browser-1, import to all others
+ *   GET  /api/browsers      - List running browsers (with lock status)
  *   POST /api/create        - Spin up a new browser container
- *   POST /api/close/:id     - Stop and remove a browser container
- *   GET  /api/browsers      - List running browsers
+ *   POST /api/close/:name   - Stop and remove a browser container
+ *   POST /api/acquire       - Get an exclusive browser (creates one if none free)
+ *   POST /api/release/:name - Release a browser back to the pool
+ *   POST /api/save          - Save cookies from all browsers to disk
+ *   POST /api/sync          - Export from browser-1, import to all others
  */
 const http = require('http');
 const fs = require('fs');
@@ -19,11 +21,11 @@ const { chromium } = require('playwright');
 
 const PORT = process.env.DASHBOARD_PORT || 3000;
 const COOKIES_FILE = path.join(__dirname, 'cookies.json');
-const COMPOSE_FILE = path.join(__dirname, 'docker-compose.yml');
-const IMAGE_NAME = 'playwright-vnc-poc-browser-1'; // built image name
+
+// In-memory lock table: { containerName: { agent: string, acquiredAt: timestamp } }
+const locks = {};
 
 function getBrowsers() {
-  // Get all containers with port 6080 (noVNC) mapped
   try {
     const out = execSync(
       `docker ps --format '{{.Names}}\\t{{.Status}}\\t{{.Ports}}' | grep '6080'`,
@@ -38,6 +40,7 @@ function getBrowsers() {
         status,
         vncPort: vncMatch ? parseInt(vncMatch[1]) : null,
         cdpPort: cdpMatch ? parseInt(cdpMatch[1]) : null,
+        lock: locks[name] || null,
       };
     });
   } catch {
@@ -81,6 +84,28 @@ function parseBody(req) {
   });
 }
 
+function createBrowser() {
+  const { vnc, cdp } = findNextPorts();
+  const id = Date.now().toString(36);
+  const name = `browser-${id}`;
+  const image = execSync(
+    `docker inspect --format='{{.Config.Image}}' $(docker ps --format '{{.Names}}' | grep browser | head -1) 2>/dev/null || echo playwright-vnc-poc-browser`,
+    { encoding: 'utf-8', timeout: 5000 }
+  ).trim();
+  const cmd = `docker run -d --name ${name} -p ${vnc}:6080 -p ${cdp}:9223 --shm-size=2g -v ${name}-data:/app/userdata ${image}`;
+  execSync(cmd, { timeout: 15000 });
+  // Import cookies if available
+  setTimeout(async () => {
+    if (fs.existsSync(COOKIES_FILE)) {
+      try {
+        const cookies = JSON.parse(fs.readFileSync(COOKIES_FILE, 'utf-8'));
+        await loadCookies(cdp, cookies);
+      } catch {}
+    }
+  }, 8000);
+  return { name, vncPort: vnc, cdpPort: cdp };
+}
+
 async function handleAPI(req, res) {
   res.setHeader('Content-Type', 'application/json');
 
@@ -105,7 +130,6 @@ async function handleAPI(req, res) {
           results.push(`${b.name}: ${e.message}`);
         }
       }
-      // Save first browser's cookies as master
       if (browsers.length > 0) {
         try {
           const cookies = await saveCookies(browsers[0].cdpPort);
@@ -149,30 +173,74 @@ async function handleAPI(req, res) {
   // Create new browser
   if (req.method === 'POST' && req.url === '/api/create') {
     try {
-      const { vnc, cdp } = findNextPorts();
-      const id = Date.now().toString(36);
-      const name = `browser-${id}`;
-      // Get the image from existing containers
-      const image = execSync(
-        `docker inspect --format='{{.Config.Image}}' playwright-vnc-poc-browser-1-1 2>/dev/null || echo playwright-vnc-poc-browser`,
-        { encoding: 'utf-8', timeout: 5000 }
-      ).trim();
-      const cmd = `docker run -d --name ${name} -p ${vnc}:6080 -p ${cdp}:9223 --shm-size=2g -v ${name}-data:/app/userdata ${image}`;
-      execSync(cmd, { timeout: 15000 });
-      // Import cookies if available
-      setTimeout(async () => {
-        if (fs.existsSync(COOKIES_FILE)) {
-          try {
-            const cookies = JSON.parse(fs.readFileSync(COOKIES_FILE, 'utf-8'));
-            await loadCookies(cdp, cookies);
-          } catch {}
-        }
-      }, 8000);
+      const b = createBrowser();
       res.writeHead(200);
-      res.end(JSON.stringify({ ok: true, message: `Created ${name} — noVNC :${vnc}, CDP :${cdp}`, name, vncPort: vnc, cdpPort: cdp }));
+      res.end(JSON.stringify({ ok: true, message: `Created ${b.name} — noVNC :${b.vncPort}, CDP :${b.cdpPort}`, ...b }));
     } catch (e) {
       res.writeHead(500);
       res.end(JSON.stringify({ ok: false, message: e.message }));
+    }
+    return true;
+  }
+
+  // Acquire a browser (get exclusive access, creates one if none free)
+  if (req.method === 'POST' && req.url === '/api/acquire') {
+    try {
+      const body = await parseBody(req);
+      const agent = body.agent || 'anonymous-' + Date.now().toString(36);
+      const browsers = getBrowsers();
+
+      // Find an unlocked browser
+      let target = browsers.find(b => b.cdpPort && !locks[b.name]);
+
+      if (!target) {
+        // No free browsers — create one
+        const created = createBrowser();
+        // Wait for CDP to be ready
+        let ready = false;
+        for (let i = 0; i < 15; i++) {
+          try {
+            execSync(`curl -s --max-time 2 http://localhost:${created.cdpPort}/json/version`, { timeout: 5000 });
+            ready = true;
+            break;
+          } catch {}
+          await new Promise(r => setTimeout(r, 1000));
+        }
+        if (!ready) throw new Error('Browser created but CDP not ready after 15s');
+        target = { name: created.name, cdpPort: created.cdpPort, vncPort: created.vncPort };
+      }
+
+      // Lock it
+      locks[target.name] = { agent, acquiredAt: Date.now() };
+
+      res.writeHead(200);
+      res.end(JSON.stringify({
+        ok: true,
+        name: target.name,
+        cdpPort: target.cdpPort,
+        vncPort: target.vncPort,
+        agent,
+        message: `Acquired ${target.name} (CDP :${target.cdpPort}) for agent "${agent}"`,
+      }));
+    } catch (e) {
+      res.writeHead(500);
+      res.end(JSON.stringify({ ok: false, message: e.message }));
+    }
+    return true;
+  }
+
+  // Release a browser (unlock it for others)
+  const releaseMatch = req.url.match(/^\/api\/release\/(.+)$/);
+  if (req.method === 'POST' && releaseMatch) {
+    const name = decodeURIComponent(releaseMatch[1]);
+    if (locks[name]) {
+      const lock = locks[name];
+      delete locks[name];
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true, message: `Released ${name} (was held by "${lock.agent}")` }));
+    } else {
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true, message: `${name} was not locked` }));
     }
     return true;
   }
@@ -182,6 +250,7 @@ async function handleAPI(req, res) {
   if (req.method === 'POST' && closeMatch) {
     try {
       const name = decodeURIComponent(closeMatch[1]);
+      delete locks[name]; // Clean up any lock
       execSync(`docker stop ${name} && docker rm ${name}`, { timeout: 15000 });
       res.writeHead(200);
       res.end(JSON.stringify({ ok: true, message: `Closed ${name}` }));
