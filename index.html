@@ -33,8 +33,7 @@
 <body>
   <div class="toolbar">
     <h1>Remote Browsers</h1>
-    <button class="btn btn-blue" onclick="apiCall('/api/save', 'Saving cookies...')">Save Cookies</button>
-    <button class="btn btn-blue" onclick="apiCall('/api/sync', 'Syncing cookies...')">Sync Cookies</button>
+    <button class="btn btn-blue" onclick="apiCall('/api/sync', 'Syncing cookies...')" title="Save cookies from browser-1 and copy to all others">Sync Cookies</button>
     <button class="btn btn-green" onclick="apiCall('/api/create', 'Creating browser...').then(refresh)">+ New Browser</button>
   </div>
   <div class="toast hidden" id="toast"></div>
@@ -71,17 +70,30 @@
 
     function refresh() { setTimeout(loadBrowsers, 3000); }
 
-    function browserCard(b) {
-      const vnc = '//' + location.hostname + ':' + b.vncPort + '/vnc.html?autoconnect=true&resize=scale';
+    // Map known VNC ports to nginx path prefixes
+    const portToPath = {};
+    let pathCounter = 1;
+
+    function browserCard(b, idx) {
+      // Use path-based routing through nginx when available, fallback to direct port
+      var vncUrl;
+      var fullUrl;
+      var prefix = '/' + (idx + 1) + '/';
+      vncUrl = prefix + 'vnc.html?path=' + (idx + 1) + '/websockify&autoconnect=true&resize=scale';
+      fullUrl = prefix + 'vnc.html?path=' + (idx + 1) + '/websockify&autoconnect=true&resize=scale';
+
+      // Clean up the display name
+      var displayName = 'Browser ' + (idx + 1);
+
       return '<div class="browser-card">' +
         '<div class="browser-header">' +
-          '<span class="label">' + b.name + ' — CDP :' + (b.cdpPort || '?') + '</span>' +
+          '<span class="label">' + displayName + ' \u2014 CDP :' + (b.cdpPort || '?') + '</span>' +
           '<div class="actions">' +
-            '<a class="btn btn-red btn-sm" href="' + vnc + '" target="_blank">Fullscreen</a>' +
+            '<a class="btn btn-red btn-sm" href="' + fullUrl + '" target="_blank">Fullscreen</a>' +
             '<button class="btn btn-close btn-sm" onclick="closeBrowser(\'' + b.name + '\')">Close</button>' +
           '</div>' +
         '</div>' +
-        '<iframe src="' + vnc + '" loading="lazy"></iframe>' +
+        '<iframe src="' + vncUrl + '" loading="lazy"></iframe>' +
       '</div>';
     }
 

@@ -67,6 +67,57 @@ The default `docker-compose.yml` starts 3 browsers:
 
 Open `http://localhost:6080/vnc.html` (or `/index.html` for the dashboard showing all 3).
 
+## Dashboard Server
+
+The dashboard server (`dashboard.js`) provides a web UI and API for managing browsers and cookies.
+
+```bash
+npm install playwright@1.50.0
+node dashboard.js
+# Open http://localhost:3000
+```
+
+The dashboard shows all running browsers with live noVNC previews, and buttons for Sync Cookies and + New Browser.
+
+### API
+
+Agents can create, use, and close browsers on demand — no human intervention needed:
+
+```
+GET  /api/browsers       - List running browsers (name, vncPort, cdpPort)
+POST /api/create         - Spin up a new browser container (returns cdpPort)
+POST /api/close/:name    - Stop and remove a browser container
+POST /api/sync           - Export cookies from browser-1, import to all others
+POST /api/save           - Save cookies from all browsers to disk
+```
+
+### Agent self-service example
+
+```js
+const { chromium } = require('playwright');
+
+// 1. Create a browser
+const res = await fetch('http://localhost:3000/api/create', { method: 'POST' });
+const { cdpPort, name } = await res.json();
+
+// 2. Wait for it to start
+await new Promise(r => setTimeout(r, 5000));
+
+// 3. Connect and do work
+const browser = await chromium.connectOverCDP(`http://localhost:${cdpPort}`);
+const page = browser.contexts()[0].pages()[0];
+await page.goto('https://example.com');
+console.log(await page.title());
+
+// 4. Disconnect
+await browser.close();
+
+// 5. Close the browser when done
+await fetch(`http://localhost:3000/api/close/${name}`, { method: 'POST' });
+```
+
+Saved cookies are auto-imported into newly created browsers, so agents get existing login sessions automatically.
+
 ## Human-in-the-Loop
 
 When the agent hits something requiring human input (login, 2FA, CAPTCHA):
@@ -278,9 +329,10 @@ playwright-vnc/
 ├── Dockerfile           # Playwright + Xvfb + noVNC + socat
 ├── start.sh             # Entrypoint: starts all services + browser
 ├── docker-compose.yml   # Multi-browser setup (3 browsers)
-├── index.html           # Dashboard showing all browsers
+├── dashboard.js         # Dashboard server with browser/cookie management API
+├── index.html           # Dashboard UI with live browser previews
 ├── agent-example.js     # Example: agent connects and controls browser
-├── share-cookies.js     # Export/import cookies between browsers
+├── share-cookies.js     # CLI tool: export/import cookies between browsers
 ├── .gitignore
 ├── LICENSE
 └── README.md
