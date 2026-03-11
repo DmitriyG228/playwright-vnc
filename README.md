@@ -2,7 +2,7 @@
 
 Run headed Playwright browsers in Docker. Watch and control them from anywhere via noVNC in your browser. Agents automate via CDP while humans observe and intervene when needed.
 
-![Dashboard showing 3 remote browsers](https://github.com/user-attachments/assets/placeholder.png)
+![Dashboard showing 3 remote browsers](screenshot.png)
 
 ## Why
 
