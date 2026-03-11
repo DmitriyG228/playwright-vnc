@@ -3,44 +3,101 @@
 <head>
   <title>Remote Browsers</title>
   <style>
+    * { box-sizing: border-box; }
     body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #eee; margin: 0; padding: 20px; }
-    h1 { margin-bottom: 20px; font-size: 20px; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(600px, 1fr)); gap: 16px; }
+    .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
+    .toolbar h1 { margin: 0; font-size: 20px; margin-right: auto; }
+    .btn { border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 600; color: #fff; }
+    .btn:disabled { opacity: 0.5; cursor: wait; }
+    .btn-green { background: #27ae60; }
+    .btn-green:hover:not(:disabled) { background: #219a52; }
+    .btn-blue { background: #2980b9; }
+    .btn-blue:hover:not(:disabled) { background: #2471a3; }
+    .btn-red { background: #e94560; }
+    .btn-red:hover:not(:disabled) { background: #c73650; }
+    .btn-close { background: #c0392b; }
+    .btn-close:hover:not(:disabled) { background: #a93226; }
+    .btn-sm { padding: 4px 10px; font-size: 12px; }
+    .toast { position: fixed; top: 20px; right: 20px; background: #16213e; border: 1px solid #0f3460;
+      padding: 12px 20px; border-radius: 6px; max-width: 400px; white-space: pre-line; z-index: 999;
+      transition: opacity 0.3s; font-size: 13px; }
+    .toast.hidden { opacity: 0; pointer-events: none; }
+    #grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(600px, 1fr)); gap: 16px; }
     .browser-card { background: #16213e; border-radius: 8px; overflow: hidden; }
-    .browser-header { margin: 0; padding: 10px 16px; background: #0f3460; font-size: 14px; display: flex; justify-content: space-between; align-items: center; }
+    .browser-header { padding: 10px 16px; background: #0f3460; font-size: 14px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
     .browser-header .label { font-weight: 600; }
-    .browser-header a {
-      color: #fff; text-decoration: none; font-size: 13px;
-      background: #e94560; padding: 4px 14px; border-radius: 4px;
-    }
-    .browser-header a:hover { background: #c73650; }
+    .browser-header .actions { display: flex; gap: 6px; align-items: center; }
     iframe { width: 100%; height: 500px; border: none; }
   </style>
 </head>
 <body>
-  <h1>Remote Browsers</h1>
-  <div class="grid">
-    <div class="browser-card">
-      <div class="browser-header">
-        <span class="label">Browser 1 &mdash; CDP :9222</span>
-        <a href="/1/vnc.html?path=1/websockify&autoconnect=true&resize=scale" target="_blank">Open Fullscreen</a>
-      </div>
-      <iframe src="/1/vnc.html?path=1/websockify&autoconnect=true&resize=scale"></iframe>
-    </div>
-    <div class="browser-card">
-      <div class="browser-header">
-        <span class="label">Browser 2 &mdash; CDP :9224</span>
-        <a href="/2/vnc.html?path=2/websockify&autoconnect=true&resize=scale" target="_blank">Open Fullscreen</a>
-      </div>
-      <iframe src="/2/vnc.html?path=2/websockify&autoconnect=true&resize=scale"></iframe>
-    </div>
-    <div class="browser-card">
-      <div class="browser-header">
-        <span class="label">Browser 3 &mdash; CDP :9226</span>
-        <a href="/3/vnc.html?path=3/websockify&autoconnect=true&resize=scale" target="_blank">Open Fullscreen</a>
-      </div>
-      <iframe src="/3/vnc.html?path=3/websockify&autoconnect=true&resize=scale"></iframe>
-    </div>
+  <div class="toolbar">
+    <h1>Remote Browsers</h1>
+    <button class="btn btn-blue" onclick="apiCall('/api/save', 'Saving cookies...')">Save Cookies</button>
+    <button class="btn btn-blue" onclick="apiCall('/api/sync', 'Syncing cookies...')">Sync Cookies</button>
+    <button class="btn btn-green" onclick="apiCall('/api/create', 'Creating browser...').then(refresh)">+ New Browser</button>
   </div>
+  <div class="toast hidden" id="toast"></div>
+  <div id="grid"></div>
+
+  <script>
+    const toast = document.getElementById('toast');
+    let toastTimer;
+
+    function showToast(msg, ms) {
+      toast.textContent = msg;
+      toast.classList.remove('hidden');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.add('hidden'), ms || 4000);
+    }
+
+    async function apiCall(url, loadingMsg) {
+      showToast(loadingMsg || 'Working...');
+      try {
+        const res = await fetch(url, { method: 'POST' });
+        const data = await res.json();
+        showToast(data.message || (data.ok ? 'Done' : 'Error'), 5000);
+        return data;
+      } catch (e) {
+        showToast('Error: ' + e.message, 5000);
+      }
+    }
+
+    async function closeBrowser(name) {
+      if (!confirm('Close ' + name + '?')) return;
+      await apiCall('/api/close/' + encodeURIComponent(name), 'Closing ' + name + '...');
+      setTimeout(refresh, 1000);
+    }
+
+    function refresh() { setTimeout(loadBrowsers, 3000); }
+
+    function browserCard(b) {
+      const vnc = '//' + location.hostname + ':' + b.vncPort + '/vnc.html?autoconnect=true&resize=scale';
+      return '<div class="browser-card">' +
+        '<div class="browser-header">' +
+          '<span class="label">' + b.name + ' — CDP :' + (b.cdpPort || '?') + '</span>' +
+          '<div class="actions">' +
+            '<a class="btn btn-red btn-sm" href="' + vnc + '" target="_blank">Fullscreen</a>' +
+            '<button class="btn btn-close btn-sm" onclick="closeBrowser(\'' + b.name + '\')">Close</button>' +
+          '</div>' +
+        '</div>' +
+        '<iframe src="' + vnc + '" loading="lazy"></iframe>' +
+      '</div>';
+    }
+
+    async function loadBrowsers() {
+      try {
+        const res = await fetch('/api/browsers');
+        const data = await res.json();
+        if (data.browsers && data.browsers.length > 0) {
+          document.getElementById('grid').innerHTML = data.browsers.map(browserCard).join('');
+        }
+      } catch {
+        // dashboard.js not running, show nothing
+      }
+    }
+
+    loadBrowsers();
+  </script>
 </body>
 </html>
